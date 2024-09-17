@@ -11,18 +11,28 @@ import (
 	"time"
 )
 
-// Time holds the schema definition for the Time entity.
+var zeroTime time.Time
+
+// Time 为模型提供记录创建时间、更新时间、删除时间
+// 创建时间是不可变的
+// 更新时间在update的时候修改
+// 删除时间在delete的时候修改
 type Time struct {
 	mixin.Schema
+	Optional bool
 }
 
 // Fields of the Time.
-func (Time) Fields() []ent.Field {
-	return []ent.Field{
-		field.Time("created_at").Default(time.Now).Immutable(),
-		field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now),
-		field.Time("deleted_at").Optional(),
+func (t Time) Fields() []ent.Field {
+	f := make([]ent.Field, 0, 3)
+	f = append(f, field.Time("created_at").Default(time.Now).Immutable())
+	f = append(f, field.Time("updated_at").Default(time.Now).UpdateDefault(time.Now))
+	if t.Optional {
+		f = append(f, field.Time("deleted_at").Optional())
+	} else {
+		f = append(f, field.Int64("deleted_at").Default(0).Comment("秒级时间戳"))
 	}
+	return f
 }
 
 // Edges of the Time.
@@ -48,7 +58,11 @@ func (t Time) Interceptors() []ent.Interceptor {
 			if !ok {
 				return nil
 			}
-			nq.WhereP(sql.FieldIsNull(t.Fields()[2].Descriptor().Name))
+			if t.Optional {
+				nq.WhereP(sql.FieldIsNull(t.Fields()[2].Descriptor().Name))
+			} else {
+				nq.WhereP(sql.FieldEQ(t.Fields()[2].Descriptor().Name, 0))
+			}
 			return nil
 		}),
 	}
@@ -63,7 +77,7 @@ func (t Time) Hooks() []ent.Hook {
 						fmt.Println(err)
 					}
 				}()
-				if m.Op().Is(ent.OpDelete) || m.Op().Is(ent.OpDeleteOne) {
+				if m.Op().Is(ent.OpDelete | ent.OpDeleteOne) {
 					if skip, _ := ctx.Value(softDeleteKey{}).(bool); skip {
 						return next.Mutate(ctx, m)
 					}
@@ -76,14 +90,18 @@ func (t Time) Hooks() []ent.Hook {
 					if !ok {
 						return nil, fmt.Errorf("unexpected mutation type %T", m)
 					}
-					mx.WhereP(sql.FieldIsNull(t.Fields()[2].Descriptor().Name))
+					if t.Optional {
+						mx.WhereP(sql.FieldIsNull(t.Fields()[2].Descriptor().Name))
+					} else {
+						mx.WhereP(sql.FieldEQ(t.Fields()[2].Descriptor().Name, 0))
+					}
 					mx.SetOp(ent.OpUpdate)
 					mx.SetDeletedAt(time.Now())
 					client := reflect.ValueOf(m).MethodByName("Client").Call(nil)[0]
 					res := client.MethodByName("Mutate").Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(m)})
-					nerr := res[1].Interface()
-					if nerr != nil {
-						return res[0].Interface(), nerr.(error)
+					nErr := res[1].Interface()
+					if nErr != nil {
+						return res[0].Interface(), nErr.(error)
 					}
 					return res[0].Interface(), nil
 				}
