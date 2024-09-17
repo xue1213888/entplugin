@@ -1,9 +1,9 @@
 package xmixin
 
 import (
+	"context"
 	"entgo.io/ent"
-	"entgo.io/ent/dialect/entsql"
-	"entgo.io/ent/schema"
+	"entgo.io/ent/privacy"
 	"entgo.io/ent/schema/field"
 	"entgo.io/ent/schema/mixin"
 )
@@ -23,15 +23,20 @@ var AuditReasonMap = map[string]string{
 	"removed":  "下架锁定",
 }
 
-func (Audit) Annotations() []schema.Annotation {
-	return []schema.Annotation{
-		entsql.WithComments(true),
-	}
-}
-
 func (Audit) Fields() []ent.Field {
 	return []ent.Field{
 		field.Enum("audit").Values("unknown", "pending", "waiting", "approved", "rejected", "removed").Comment("审核状态"),
 		field.String("reason").MaxLen(255).Comment("审核原因"),
+	}
+}
+
+func (Audit) Policy() ent.Policy {
+	return privacy.Policy{
+		Query: privacy.QueryPolicy{
+			privacy.ContextQueryMutationRule(func(ctx context.Context) error {
+				return nil
+			}),
+		},
+		Mutation: nil,
 	}
 }
